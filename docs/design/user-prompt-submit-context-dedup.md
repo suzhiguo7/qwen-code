@@ -80,8 +80,10 @@ caller-authored message can end in the wrapped block byte-for-byte (an ACP
 client can submit two text blocks that persist as exactly the injection
 shape). The injector therefore stamps the part it appends with a
 module-private symbol receipt (`createUserPromptSubmitContextPart`), and the
-predicate requires that receipt in addition to the exact trailing text in a
-user entry with at least one part of the user's own ahead of it. The symbol
+predicate requires that receipt in addition to the exact text at an index of
+1 or later in a user entry with at least two parts. Later appended parts,
+including a memory catalog snapshot or ordinary context, do not invalidate
+that evidence of delivery. The symbol
 cannot cross a JSON transcript, an ACP prompt block, or model output, so only
 a part the injector built — or one re-stamped by resume from the recorded
 per-turn `hookContext` provenance — counts as delivered. Tagged text that
@@ -89,7 +91,7 @@ merely appears, in any entry shape, does not suppress a fresh delivery; when
 provenance cannot be established, injection proceeds as before.
 
 The predicate answers a question about a single history entry — does this entry
-carry exactly this wrapped block where injection would have put it — and the
+retain exactly this wrapped block with its receipt after the first part — and the
 caller feeds it the entries newest first and stops at the first match. Keeping
 the predicate per entry rather than per history array means the same helper
 serves both injection sites, and each site keeps its own access to history.
@@ -102,7 +104,9 @@ The receipt survives spread-based container copies, which preserve symbol
 keys, but not `structuredClone` or serialization; both drop symbol-keyed
 properties. On resume, transcript records are rebuilt into API history without
 the symbol; the rebuild re-stamps it from the recorded per-turn `hookContext`
-provenance, which only the injector writes. The ACP/IDE site does not record
+provenance, which only the injector writes. Receipt restoration still checks
+only the trailing part of the original user record, before a separate memory
+catalog snapshot record appends its part during replay. The ACP/IDE site does not record
 that provenance for its turns, so a session resumed after an ACP-delivered
 block conservatively re-injects rather than suppressing on unprovable origin.
 A prepared-request replay installs history with `structuredClone`
@@ -179,8 +183,9 @@ accepted and documented as a limitation rather than solved here.
 
 1. Unit coverage for the predicate over absent, present, and malformed entries,
    plus the provenance cases: the tagged block in a model entry, as a sole
-   user-authored part, ahead of the trailing part, and a receipt-stamped part
-   that is not last all inject rather than suppress. The shape-only variants
+   user-authored part, or at index zero all inject rather than suppress. A
+   receipt-stamped matching part after index zero still suppresses when
+   followed by a memory catalog or ordinary appended context. The shape-only variants
    (surrounding whitespace, no newline delimiters) are covered against
    `isUserPromptSubmitContextPartText`, which recognizes any tagged block; the
    predicate compares one exact payload and deliberately does not trim.
@@ -203,12 +208,12 @@ is sent to the model.
 
 ## Acceptance criteria
 
-- A byte-identical hook context block reaches the model at most once while it
-  stays the trailing part of its user entry, from either injection site, as
-  observed in the model-bound request and in the session transcript. A later
-  append into that entry (the manual plan-exit notice, a mid-turn merge) pushes
-  the stamped part off the trailing position, and a history rebuild without
-  per-turn `hookContext` provenance drops the receipt.
+- A byte-identical hook context block reaches the model at most once while its
+  receipt-stamped part remains at index 1 or later in its user entry, from
+  either injection site, as observed in model-bound requests and the session
+  transcript. Any appended suffix preserves suppression, including a memory
+  catalog snapshot, a manual plan-exit notice, or a mid-turn merge. A history
+  rebuild without per-turn `hookContext` provenance drops the receipt.
 - A compaction inside a send re-appends the suppressed block exactly once — one
   owner per send, the ACP send helper when its own compaction consumed the
   copy, otherwise `LlmChat` — and never twice when the helper already appended
